@@ -1,52 +1,43 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, EmailStr
-from typing import List
+from fastapi import FastAPI, HTTPException, Depends, status
+from sqlalchemy.orm import Session
+from db import crud, models, schemas
+from db.database import SessionLocal, engine
 
 
+models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 
-class User(BaseModel):
-    id: int
-    username: str
-    email: EmailStr
+async def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-    class Config:
-        from_attributes = True
+@app.post("/users",  response_model=list[schemas.User])
+async def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    authors = crud.get_users(db, skip=skip, limit=limit)
+    if not authors:
+        raise HTTPException(status_code=404, detail="Користувачів не знайдено")
+    return authors
 
-class CreateUserRequest(BaseModel):
-    username: str
-    email: EmailStr
-# users: List[User] = []
+@app.post("/users/{user_id}", response_model=schemas.User)
+async def get_user_by_id(user_id:int, db: Session = Depends(get_db)):
+    db_author = crud.get_user_by_id(db, user_id)
+    if db_author is None:
+        raise HTTPException(status_code=404, detail="Автор не знайдений")
+    return db_author
 
-users = [
-    User(id=1, username="user1", email="user1@gmail.com"),
-    User(id=2, username="user2", email="user2@gmail.com")
-]
-
-current_id = 2
-
-@app.post("/users/{user_id}", response_model=User)
-def get_user_by_id(id:int):
-    for user in users:
-        if user.id == id:
-            return user
-    raise HTTPException(status_code=404, detail="Користувач не знайден")
-
-
-@app.post("/users", response_model=List[User])
-def get_users():
-    return users
-
-
-@app.post("/create_user", response_model=CreateUserRequest)
-def add_user(user : CreateUserRequest):
-    
-    global current_id
-    current_id += 1
-    new_user = User(id=current_id, username=user.username, email=user.email)
-    users.append(new_user)
-    return new_user
+@app.post("/create_user", response_model=schemas.User)
+def add_user(user : schemas.UserCreate, db: Session = Depends(get_db)):
+    new_user = crud.get_user_by_username(db = db,username=user.username)
+    if new_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Такий користувач вже існує",
+        )
+    return crud.create_user(db=db, user=user)
 
 
 
